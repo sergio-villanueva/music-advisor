@@ -1,0 +1,1459 @@
+type: edu
+custom_name: stage4
+files:
+- name: build.gradle
+  visible: true
+  text: |-
+    apply plugin: 'java'
+    apply plugin: 'application'
+
+    group 'advisor'
+    version '1.0-SNAPSHOT'
+
+    repositories {
+        mavenCentral()
+    }
+
+    dependencies {
+        implementation 'com.google.code.gson:gson:+'
+    }
+
+    jar {
+        manifest {
+            attributes 'Main-Class' : 'advisor.Main'
+        }
+        from {
+            configurations.compile.collect { it.isDirectory() ? it : zipTree(it) }
+        }
+    }
+  learner_created: false
+- name: src/advisor/Main.java
+  visible: true
+  text: |
+    package advisor;
+    import music.Album;
+    import music.MusicAdvisor;
+    import music.Playlist;
+
+    import java.util.*;
+
+    public class Main {
+
+        public static final String SPOTIFY_SERVER_PATH = "https://accounts.spotify.com";;
+        public static final String SPOTIFY_API_PATH = "/api/token";
+
+        public static void main(String[] args) {
+
+            final String serverPath;
+            if (args[0].equals("-access") && args.length > 1) {
+                serverPath = args[1];
+            } else {
+                serverPath = SPOTIFY_SERVER_PATH;
+            }
+
+
+
+            MusicAdvisor advisor = new MusicAdvisor(serverPath, serverPath + SPOTIFY_API_PATH);
+            boolean exitSystem = false;
+
+            try (Scanner scanner = new Scanner(System.in)) {
+                while (!exitSystem) {
+                    //displayMainMenu();
+                    // fetch user input
+                    String[] mainOption = scanner.nextLine().trim().split(" ");
+
+                    switch (mainOption[0]) {
+                        case "new":
+                            if (!advisor.isPermissible()) {
+                                // block user commands until login
+                                System.out.println("Please, provide access for application.");
+                                continue;
+                            }
+
+                            System.out.println("---NEW RELEASES---");
+                            Album[] newAlbums = advisor.newAlbums();
+                            for (Album album : newAlbums) {
+                                System.out.println(album.getCoverDetails());
+                            }
+                            System.out.println();
+                            break;
+
+                        case "featured":
+                            if (!advisor.isPermissible()) {
+                                // block user commands until login
+                                System.out.println("Please, provide access for application.");
+                                continue;
+                            }
+
+                            System.out.println("---FEATURED---");
+                            Playlist[] featuredPlaylists = advisor.featured();
+                            for (Playlist playlist : featuredPlaylists) {
+                                System.out.println(playlist.getName());
+                            }
+                            System.out.println();
+                            break;
+
+                        case "categories":
+                            if (!advisor.isPermissible()) {
+                                // block user commands until login
+                                System.out.println("Please, provide access for application.");
+                                continue;
+                            }
+
+                            System.out.println("---CATEGORIES---");
+                            String[] categories = advisor.getCategories();
+                            for (String category : categories) {
+                                System.out.println(category);
+                            }
+                            System.out.println();
+                            break;
+
+                        case "playlists":
+                            if (!advisor.isPermissible()) {
+                                // block user commands until login
+                                System.out.println("Please, provide access for application.");
+                                continue;
+                            }
+
+                            System.out.println("---" + mainOption[1].toUpperCase() + " PLAYLISTS---");
+                            List<String> categoryList = Arrays.asList(advisor.getCategories());
+                            boolean validCategory = categoryList.contains(mainOption[1]);
+                            if (validCategory) {
+
+                                Playlist[] requestedPlaylists = advisor.getPlaylists(mainOption[1]);
+                                for (Playlist playlist : requestedPlaylists) {
+                                    System.out.println(playlist.getName());
+                                }
+                                System.out.println();
+
+                            } else {
+
+                                System.out.println("Invalid Category");
+
+                            }
+                            break;
+
+                        case "auth":
+                            advisor.auth();
+                            System.out.println("---SUCCESS---");
+                            break;
+
+                        case "exit":
+                            System.out.println("---GOODBYE!---");
+                            exitSystem = true;
+                            break;
+
+                        default:
+                            System.out.println("Invalid Keyword: Try Again");
+                    }
+
+
+
+                }
+            }
+
+        }
+
+        static void displayMainMenu() {
+            System.out.println("Enter one of the following options:");
+            System.out.println("featured - retrieve the latest playlists from Spotify");
+            System.out.println("new - retrieve the newest albums");
+            System.out.println("categories - view the many music categories on offer");
+            System.out.println("exit - shut down");
+            System.out.println();
+        }
+    }
+  learner_created: false
+- name: src/music/MusicAdvisor.java
+  visible: true
+  text: |
+    package music;
+
+
+    import http.AdvisorClient;
+    import http.AdvisorServer;
+
+    import java.io.IOException;
+
+    public class MusicAdvisor {
+
+        private boolean permissible = false;
+        private final String serverPath;
+        private final String tokenPath;
+
+        public MusicAdvisor(String serverPath, String tokenPath) {
+            this.serverPath = serverPath;
+            this.tokenPath = tokenPath;
+        }
+
+        private String getAbsoluteApiPath() { return serverPath + tokenPath; }
+
+        public void auth() {
+            if (isPermissible() == true) {
+                System.out.println("User already authorized");
+                return;
+            }
+
+            setPermissible(true);
+
+            try {
+
+                AdvisorServer advisorServer = new AdvisorServer();
+                boolean authSuccess = advisorServer.authorize();
+                for (int count = 5; !authSuccess && count > 0; count--) {
+                    authSuccess = advisorServer.authorize();
+                }
+                if (!authSuccess) {
+                    System.out.println("code not received");
+                    return;
+                }
+                String code = advisorServer.getAuthCode();
+                AdvisorClient advisorClient = new AdvisorClient();
+                boolean exchangeSuccess = advisorClient.exchange(code, tokenPath); // exchange auth code for access token
+                for (int count = 5; !exchangeSuccess && count > 0; count--) {
+                    exchangeSuccess = advisorClient.exchange(code, tokenPath);
+                }
+                if (!exchangeSuccess) {
+                    System.out.println("token not received");
+                    return;
+                }
+
+            } catch (IOException e) {
+                System.out.println("advisor server constructor failed");
+                e.printStackTrace();
+            }
+
+
+
+        }
+
+        private void setPermissible(boolean state) {
+            permissible = state;
+        }
+
+        public boolean isPermissible() {
+            return permissible;
+        }
+
+
+        public Playlist[] featured() {
+            // substitute for Spotify API work
+            Playlist play1 = new Playlist("Mellow Morning","link1");
+            Playlist play2 = new Playlist("Wake Up and Smell the Coffee","link2");
+            Playlist play3 = new Playlist("Monday Motivation","link3");
+            Playlist play4 = new Playlist("Songs to Sing in the Shower", "link4");
+
+            return new Playlist[]{play1, play2, play3, play4};
+        }
+
+        public Album[] newAlbums() {
+            // substitute for Spotify API work
+            String[] artists1 = new String[]{"Sia", "Diplo", "Labrinth"};
+            String[] artists2 = new String[]{"Lil Peep"};
+            String[] artists3 = new String[]{"Panic! At The Disco"};
+            String[] artists4 = new String[]{"Slipknot"};
+
+            Album album1 = new Album(artists1, "Mountains","link1");
+            Album album2 = new Album(artists2,"Runaway", "link2");
+            Album album3 = new Album(artists3, "The Greatest Show", "link3");
+            Album album4 = new Album(artists4, "All Out Life", "link4");
+
+            return new Album[]{album1, album2, album3, album4};
+        }
+
+        public String[] getCategories() {
+            // substitute for Spotify API work
+            return new String[]{"Top Lists", "Pop", "Mood", "Latin"};
+        }
+
+        public Playlist[] getPlaylists(String category) {
+            // substitute for Spotify API work
+            Playlist play1 = new Playlist("Walk Like A Badass","link1");
+            Playlist play2 = new Playlist("Rage Beats","link2");
+            Playlist play3 = new Playlist("Arab Mood Booster","link3");
+            Playlist play4 = new Playlist("Sunday Stroll", "link4");
+
+            return new Playlist[]{play1, play2, play3, play4};
+        }
+
+    }
+  learner_created: false
+- name: src/music/Playlist.java
+  visible: true
+  text: |
+    package music;
+
+    public class Playlist {
+
+        private String name;
+        private String spotifyLink;
+
+        Playlist(String name, String spotifyLink) {
+            this.name = name;
+            this.spotifyLink = spotifyLink;
+        }
+
+        public String getName() {
+            return name;
+        }
+    }
+  learner_created: false
+- name: src/music/Album.java
+  visible: true
+  text: |
+    package music;
+
+    import java.util.Arrays;
+
+    public class Album {
+        private String[] artists;
+        private String title;
+        private String spotifyLink;
+
+        Album(String[] artists, String title, String spotifyLink) {
+            this.artists = artists;
+            this.title = title;
+            this.spotifyLink = spotifyLink;
+        }
+
+        public String getCoverDetails() {
+            StringBuilder cover = new StringBuilder(title);
+            cover.append(" ");
+            cover.append(Arrays.toString(artists));
+
+            return cover.toString();
+        }
+    }
+  learner_created: false
+- name: src/http/AdvisorClient.java
+  visible: true
+  text: |
+    package http;
+
+    import com.google.gson.Gson;
+
+    import java.io.IOException;
+    import java.net.URI;
+    import java.net.http.HttpClient;
+    import java.net.http.HttpRequest;
+    import java.net.http.HttpResponse;
+    import java.time.Duration;
+
+
+    // must be renamed to AdvisorClient: It's still a static class
+    public class AdvisorClient {
+
+        private SpotifyToken spotifyToken = null;
+        private long startTime = 0;
+
+
+        public boolean exchange(String code, String path) {
+            String jsonCredentials = "{" +
+                    "\"grant_type\":" + "\"" + AdvisorServer.grant_type + "\"," +
+                    "\"code\":" + "\"" + code + "\"," +
+                    "\"redirect_uri\":" + "\"" + AdvisorServer.redirect_uri + "\"" +
+                    "}";
+            try {
+                String jsonResult = postMethod(jsonCredentials, path);
+                System.out.println(jsonResult);
+                this.spotifyToken = toSpotifyToken(jsonResult);
+            } catch (IOException | InterruptedException e) {
+                return false;
+            }
+            this.startTime = System.nanoTime();
+            return true;
+        }
+
+        public boolean isTokenExpired() {
+            long duration = spotifyToken.getExpires_in();
+            return startTime + duration < System.nanoTime();
+        }
+
+        public void refresh(String path) throws IOException, InterruptedException {
+            String refreshToken = spotifyToken.getRefresh_token();
+            this.spotifyToken = toSpotifyToken(postMethod(refreshToken, path));
+            this.startTime = System.nanoTime();
+        }
+
+        public String getTokenType() {
+            return spotifyToken.getToken_type();
+        }
+
+        private static SpotifyToken toSpotifyToken(String json) {
+            Gson gson = new Gson();
+            return gson.fromJson(json, SpotifyToken.class);
+        }
+
+        private static String postMethod(String json, String path) throws IOException, InterruptedException {
+            HttpClient client = HttpClient.newHttpClient();
+
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create(path))
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(json))
+                    .timeout(Duration.ofMillis(10000L))
+                    .build();
+
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+
+            return response.body();
+        }
+
+
+
+        private class SpotifyToken {
+            private String access_token;
+            private String token_type;
+            private String scope;
+            private int expires_in;
+            private String refresh_token;
+
+            public String getAccess_token() {
+                return access_token;
+            }
+
+            public void setAccess_token(String access_token) {
+                this.access_token = access_token;
+            }
+
+            public String getToken_type() {
+                return token_type;
+            }
+
+            public void setToken_type(String token_type) {
+                this.token_type = token_type;
+            }
+
+            public String getScope() {
+                return scope;
+            }
+
+            public void setScope(String scope) {
+                this.scope = scope;
+            }
+
+            public int getExpires_in() {
+                return expires_in;
+            }
+
+            public void setExpires_in(int expires_in) {
+                this.expires_in = expires_in;
+            }
+
+            public String getRefresh_token() {
+                return refresh_token;
+            }
+
+            public void setRefresh_token(String refresh_token) {
+                this.refresh_token = refresh_token;
+            }
+
+        }
+
+    }
+  learner_created: false
+- name: test/MockTokenServer.java
+  visible: false
+  text: |
+    import org.hyperskill.hstest.mocks.web.WebServerMock;
+
+    public class MockTokenServer extends Thread {
+
+        WebServerMock accessServer;
+
+        public MockTokenServer (WebServerMock accessServer) {
+            this.accessServer = accessServer;
+        }
+
+        @Override
+        public void run() {
+            accessServer.start();
+            accessServer.run();
+        }
+
+        public void stopMock() {
+            interrupt();
+        }
+    }
+  learner_created: false
+- name: test/MusicAdvisorTest.java
+  visible: false
+  text: |-
+    import org.hyperskill.hstest.dynamic.DynamicTest;
+    import org.hyperskill.hstest.exception.outcomes.WrongAnswer;
+    import org.hyperskill.hstest.mocks.web.WebServerMock;
+    import org.hyperskill.hstest.stage.StageTest;
+    import org.hyperskill.hstest.testcase.CheckResult;
+    import org.hyperskill.hstest.testing.TestedProgram;
+    import org.junit.AfterClass;
+
+    @SuppressWarnings("unused")
+    public class MusicAdvisorTest extends StageTest<String> {
+
+        private static final String fictiveAuthCode = "123123";
+        private static final String fictiveAccessToken = "456456";
+        private static final String fictiveRefreshToken = "567567";
+
+
+        private static final int accessServerPort = 45678;
+        private static final int resourceServerPort = 56789;
+
+        private static final String accessServerUrl = "http://127.0.0.1:" + accessServerPort;
+        private static final String resourceServerUrl = "http://127.0.0.1:" + resourceServerPort;
+
+        private static final String[] arguments = new String[]{
+                "-access",
+                accessServerUrl,
+                "-resource",
+                resourceServerUrl
+        };
+
+        private static final String tokenResponse = "{" +
+                "\"access_token\":\"" + fictiveAccessToken + "\"," +
+                "\"token_type\":\"Bearer\"," +
+                "\"expires_in\":3600," +
+                "\"refresh_token\":" + "\"" + fictiveRefreshToken + "\"," +
+                "\"scope\":\"\"" +
+                "}";
+
+        // TODO handle auth code argument to get the token.
+        private static final WebServerMock accessServer = new WebServerMock(accessServerPort)
+                .setPage("/api/token", tokenResponse);
+
+
+        private static final String spotifyServerUrl = "https://api\\.spotify\\.com";
+
+        private static final String apiCategoriesResponse = """
+            {
+                "categories": {
+                    "href": "https://api.spotify.com/v1/browse/categories?offset=0&limit=20",
+                    "items": [
+                        {
+                            "href": "https://api.spotify.com/v1/browse/categories/toplists",
+                            "icons": [
+                                {
+                                    "height": 275,
+                                    "url": "https://datsnxq1rwndn.cloudfront.net/media/derived/toplists_11160599e6a04ac5d6f2757f5511778f_0_0_275_275.jpg",
+                                    "width": 275
+                                }
+                            ],
+                            "id": "toplists",
+                            "name": "Top Lists"
+                        },
+                        {
+                            "href": "https://api.spotify.com/v1/browse/categories/mood",
+                            "icons": [
+                                {
+                                    "height": 274,
+                                    "url": "https://datsnxq1rwndn.cloudfront.net/media/original/mood-274x274_976986a31ac8c49794cbdc7246fd5ad7_274x274.jpg",
+                                    "width": 274
+                                }
+                            ],
+                            "id": "mood",
+                            "name": "Super Mood"
+                        },
+                        {
+                            "href": "https://api.spotify.com/v1/browse/categories/party",
+                            "icons": [
+                                {
+                                    "height": 274,
+                                    "url": "https://datsnxq1rwndn.cloudfront.net/media/derived/party-274x274_73d1907a7371c3bb96a288390a96ee27_0_0_274_274.jpg",
+                                    "width": 274
+                                }
+                            ],
+                            "id": "party",
+                            "name": "Party Time"
+                        }
+                    ],
+                    "limit": 20,
+                    "next": null,
+                    "offset": 0,
+                    "previous": null,
+                    "total": 3
+                }
+            }""".replaceAll(spotifyServerUrl, resourceServerUrl);
+
+
+        private static final String apiPlaylistsPartyResponse = """
+            {
+                "playlists": {
+                    "href": "https://api.spotify.com/v1/browse/categories/party/playlists?offset=0&limit=20",
+                    "items": [
+                        {
+                            "collaborative": false,
+                            "external_urls": {
+                                "spotify": "http://open.spotify.com/user/spotifybrazilian/playlist/4k7EZPI3uKMz4aRRrLVfen"
+                            },
+                            "href": "https://api.spotify.com/v1/users/spotifybrazilian/playlists/4k7EZPI3uKMz4aRRrLVfen",
+                            "id": "4k7EZPI3uKMz4aRRrLVfen",
+                            "images": [
+                                {
+                                    "height": 300,
+                                    "url": "https://i.scdn.co/image/bf6544c213532e9650088dfef76c8521093d970e",
+                                    "width": 300
+                                }
+                            ],
+                            "name": "Noite Eletronica",
+                            "owner": {
+                                "external_urls": {
+                                    "spotify": "http://open.spotify.com/user/spotifybrazilian"
+                                },
+                                "href": "https://api.spotify.com/v1/users/spotifybrazilian",
+                                "id": "spotifybrazilian",
+                                "type": "user",
+                                "uri": "spotify:user:spotifybrazilian"
+                            },
+                            "public": null,
+                            "snapshot_id": "PULvu1V2Ps8lzCxNXfNZTw4QbhBpaV0ZORc03Mw6oj6kQw9Ks2REwhL5Xcw/74wL",
+                            "tracks": {
+                                "href": "https://api.spotify.com/v1/users/spotifybrazilian/playlists/4k7EZPI3uKMz4aRRrLVfen/tracks",
+                                "total": 100
+                            },
+                            "type": "playlist",
+                            "uri": "spotify:user:spotifybrazilian:playlist:4k7EZPI3uKMz4aRRrLVfen"
+                        },
+                        {
+                            "collaborative": false,
+                            "external_urls": {
+                                "spotify": "http://open.spotify.com/user/spotifybrazilian/playlist/4HZh0C9y80GzHDbHZyX770"
+                            },
+                            "href": "https://api.spotify.com/v1/users/spotifybrazilian/playlists/4HZh0C9y80GzHDbHZyX770",
+                            "id": "4HZh0C9y80GzHDbHZyX770",
+                            "images": [
+                                {
+                                    "height": 300,
+                                    "url": "https://i.scdn.co/image/be6c333146674440123073cb32c1c8b851e69023",
+                                    "width": 300
+                                }
+                            ],
+                            "name": "Festa Indie",
+                            "owner": {
+                                "external_urls": {
+                                    "spotify": "http://open.spotify.com/user/spotifybrazilian"
+                                },
+                                "href": "https://api.spotify.com/v1/users/spotifybrazilian",
+                                "id": "spotifybrazilian",
+                                "type": "user",
+                                "uri": "spotify:user:spotifybrazilian"
+                            },
+                            "public": null,
+                            "snapshot_id": "V66hh9k2HnLCdzHvtoXPv+tm0jp3ODM63SZ0oISfGnlHQxwG/scupDbKgIo99Zfz",
+                            "tracks": {
+                                "href": "https://api.spotify.com/v1/users/spotifybrazilian/playlists/4HZh0C9y80GzHDbHZyX770/tracks",
+                                "total": 74
+                            },
+                            "type": "playlist",
+                            "uri": "spotify:user:spotifybrazilian:playlist:4HZh0C9y80GzHDbHZyX770"
+                        }
+                    ],
+                    "limit": 20,
+                    "next": null,
+                    "offset": 0,
+                    "previous": null,
+                    "total": 2
+                }
+            }""".replaceAll(spotifyServerUrl, resourceServerUrl);
+
+        private static final String testErrorMessage = "Test unpredictable error message";
+
+        private static final String apiTestErrorResponse = "{\"error\":{\"status\":404,\"message\":\"" + testErrorMessage + "\"}}";
+
+        private static final String apiNewReleasesResponse = """
+            {
+                "albums": {
+                    "href": "https://api.spotify.com/v1/browse/new-releases?offset=0&limit=20",
+                    "items": [
+                        {
+                            "album_type": "single",
+                            "artists": [
+                                {
+                                    "external_urls": {
+                                        "spotify": "https://open.spotify.com/artist/2RdwBSPQiwcmiDo9kixcl8"
+                                    },
+                                    "href": "https://api.spotify.com/v1/artists/2RdwBSPQiwcmiDo9kixcl8",
+                                    "id": "2RdwBSPQiwcmiDo9kixcl8",
+                                    "name": "Pharrell Williams",
+                                    "type": "artist",
+                                    "uri": "spotify:artist:2RdwBSPQiwcmiDo9kixcl8"
+                                }
+                            ],
+                            "available_markets": [
+                                "AD"
+                            ],
+                            "external_urls": {
+                                "spotify": "https://open.spotify.com/album/5ZX4m5aVSmWQ5iHAPQpT71"
+                            },
+                            "href": "https://api.spotify.com/v1/albums/5ZX4m5aVSmWQ5iHAPQpT71",
+                            "id": "5ZX4m5aVSmWQ5iHAPQpT71",
+                            "name": "Runnin'",
+                            "type": "album",
+                            "uri": "spotify:album:5ZX4m5aVSmWQ5iHAPQpT71"
+                        },
+                        {
+                            "album_type": "single",
+                            "artists": [
+                                {
+                                    "external_urls": {
+                                        "spotify": "https://open.spotify.com/artist/3TVXtAsR1Inumwj472S9r4"
+                                    },
+                                    "href": "https://api.spotify.com/v1/artists/3TVXtAsR1Inumwj472S9r4",
+                                    "id": "3TVXtAsR1Inumwj472S9r4",
+                                    "name": "Drake2",
+                                    "type": "artist",
+                                    "uri": "spotify:artist:3TVXtAsR1Inumwj472S9r4"
+                                },
+                                {
+                                    "external_urls": {
+                                        "spotify": "https://open.spotify.com/artist/3TVXtAsR1Inumwj472S9r4"
+                                    },
+                                    "href": "https://api.spotify.com/v1/artists/3TVXtAsR1Inumwj472S9r4",
+                                    "id": "3TVXtAsR1Inumwj472S9r4",
+                                    "name": "Drake3",
+                                    "type": "artist",
+                                    "uri": "spotify:artist:3TVXtAsR1Inumwj472S9r4"
+                                }
+                            ],
+                            "available_markets": [
+                                "AD"
+                            ],
+                            "external_urls": {
+                                "spotify": "https://open.spotify.com/album/0geTzdk2InlqIoB16fW9Nd"
+                            },
+                            "href": "https://api.spotify.com/v1/albums/0geTzdk2InlqIoB16fW9Nd",
+                            "id": "0geTzdk2InlqIoB16fW9Nd",
+                            "name": "Sneakin'",
+                            "type": "album",
+                            "uri": "spotify:album:0geTzdk2InlqIoB16fW9Nd"
+                        }
+                    ],
+                    "limit": 20,
+                    "next": null,
+                    "offset": 0,
+                    "previous": null,
+                    "total": 2
+                }
+            }""".replaceAll(spotifyServerUrl, resourceServerUrl);
+
+
+        private static final String apiFeaturedPlaylistsResponse = """
+            {
+                "message": "Monday morning music, coming right up!",
+                "playlists": {
+                    "href": "https://api.spotify.com/v1/browse/featured-playlists?offset=0&limit=20",
+                    "items": [
+                        {
+                            "collaborative": false,
+                            "external_urls": {
+                                "spotify": "http://open.spotify.com/user/spotify/playlist/6ftJBzU2LLQcaKefMi7ee7"
+                            },
+                            "href": "https://api.spotify.com/v1/users/spotify/playlists/6ftJBzU2LLQcaKefMi7ee7",
+                            "id": "6ftJBzU2LLQcaKefMi7ee7",
+                            "images": [
+                                {
+                                    "height": 300,
+                                    "url": "https://i.scdn.co/image/7bd33c65ebd1e45975bbcbbf513bafe272f033c7",
+                                    "width": 300
+                                }
+                            ],
+                            "name": "Monday Morning Mood",
+                            "owner": {
+                                "external_urls": {
+                                    "spotify": "http://open.spotify.com/user/spotify"
+                                },
+                                "href": "https://api.spotify.com/v1/users/spotify",
+                                "id": "spotify",
+                                "type": "user",
+                                "uri": "spotify:user:spotify"
+                            },
+                            "public": null,
+                            "snapshot_id": "WwGvSIVUkUvGvqjgj/bQHlRycYmJ2TkoIxYfoalWlmIZT6TvsgvGMgtQ2dGbkrAW",
+                            "tracks": {
+                                "href": "https://api.spotify.com/v1/users/spotify/playlists/6ftJBzU2LLQcaKefMi7ee7/tracks",
+                                "total": 245
+                            },
+                            "type": "playlist",
+                            "uri": "spotify:user:spotify:playlist:6ftJBzU2LLQcaKefMi7ee7"
+                        },
+                        {
+                            "collaborative": false,
+                            "external_urls": {
+                                "spotify": "http://open.spotify.com/user/spotify__sverige/playlist/4uOEx4OUrkoGNZoIlWMUbO"
+                            },
+                            "href": "https://api.spotify.com/v1/users/spotify__sverige/playlists/4uOEx4OUrkoGNZoIlWMUbO",
+                            "id": "4uOEx4OUrkoGNZoIlWMUbO",
+                            "images": [
+                                {
+                                    "height": 300,
+                                    "url": "https://i.scdn.co/image/24aa1d1b491dd529b9c03392f350740ed73438d8",
+                                    "width": 300
+                                }
+                            ],
+                            "name": "Upp och hoppa!",
+                            "owner": {
+                                "external_urls": {
+                                    "spotify": "http://open.spotify.com/user/spotify__sverige"
+                                },
+                                "href": "https://api.spotify.com/v1/users/spotify__sverige",
+                                "id": "spotify__sverige",
+                                "type": "user",
+                                "uri": "spotify:user:spotify__sverige"
+                            },
+                            "public": null,
+                            "snapshot_id": "0j9Rcbt2KtCXEXKtKy/tnSL5r4byjDBOIVY1dn4S6GV73EEUgNuK2hU+QyDuNnXz",
+                            "tracks": {
+                                "href": "https://api.spotify.com/v1/users/spotify__sverige/playlists/4uOEx4OUrkoGNZoIlWMUbO/tracks",
+                                "total": 38
+                            },
+                            "type": "playlist",
+                            "uri": "spotify:user:spotify__sverige:playlist:4uOEx4OUrkoGNZoIlWMUbO"
+                        }
+                    ],
+                    "limit": 20,
+                    "next": null,
+                    "offset": 0,
+                    "previous": null,
+                    "total": 2
+                }
+            }""".replaceAll(spotifyServerUrl, resourceServerUrl);
+
+        private static final TempWebServerMock resourceServerMock = new TempWebServerMock(resourceServerPort)
+                .setPage("/v1/browse/categories", apiCategoriesResponse)
+                .setPage("/v1/browse/categories/party/playlists", apiPlaylistsPartyResponse)
+                // unpredictable error on toplists request!!!
+                .setPage("/v1/browse/categories/toplists/playlists", apiTestErrorResponse)
+                .setPage("/v1/browse/new-releases", apiNewReleasesResponse)
+                .setPage("/v1/browse/featured-playlists", apiFeaturedPlaylistsResponse);
+
+        private static final MockTokenServer tokenServer = new MockTokenServer(accessServer);
+        private static final MockTokenServer resourceServer = new MockTokenServer(resourceServerMock);
+
+        public static void auth(TestedProgram userProgram) {
+
+            Server server = new Server(userProgram, fictiveAuthCode);
+            server.start();
+
+            synchronized (accessServer) {
+                if (!accessServer.isStarted())
+                    tokenServer.start();
+            }
+
+            synchronized (resourceServerMock) {
+                if (!resourceServerMock.isStarted())
+                    resourceServer.start();
+            }
+
+            userProgram.goBackground();
+            userProgram.execute("auth");
+
+            try {
+                server.join();
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+
+            if (Server.checkResult != null) {
+                throw new WrongAnswer(Server.checkResult.getFeedback());
+            }
+
+            userProgram.stopBackground();
+        }
+
+        @DynamicTest
+        CheckResult testNewWithoutAuth() {
+
+            TestedProgram userProgram = new TestedProgram();
+            userProgram.start(arguments);
+            userProgram.setReturnOutputAfterExecution(false);
+
+            userProgram.execute("new");
+
+            String outputAfterNew = userProgram.getOutput();
+
+            if (!outputAfterNew.strip().startsWith("Please, provide access for application.")) {
+                return CheckResult.wrong("When no access provided you should output " +
+                        "\"Please, provide access for application.\"");
+            }
+
+            userProgram.execute("exit");
+            userProgram.stop();
+
+            return CheckResult.correct();
+        }
+
+        @DynamicTest
+        CheckResult testFeaturedWithoutAuth() {
+
+            TestedProgram userProgram = new TestedProgram();
+            userProgram.start(arguments);
+            userProgram.setReturnOutputAfterExecution(false);
+
+            userProgram.execute("featured");
+
+            String outputAfterNew = userProgram.getOutput();
+
+            if (!outputAfterNew.strip().startsWith("Please, provide access for application.")) {
+                return CheckResult.wrong("When no access provided you should output " +
+                        "\"Please, provide access for application.\"");
+            }
+
+            userProgram.execute("exit");
+            userProgram.stop();
+
+            return CheckResult.correct();
+        }
+
+        @DynamicTest
+        CheckResult testCategoriesWithoutAuth() {
+
+            TestedProgram userProgram = new TestedProgram();
+            userProgram.start(arguments);
+            userProgram.setReturnOutputAfterExecution(false);
+
+            userProgram.execute("categories");
+
+            String outputAfterNew = userProgram.getOutput();
+
+            if (!outputAfterNew.strip().startsWith("Please, provide access for application.")) {
+                return CheckResult.wrong("When no access provided you should output " +
+                        "\"Please, provide access for application.\"");
+            }
+
+            userProgram.execute("exit");
+            userProgram.stop();
+
+            return CheckResult.correct();
+        }
+
+        @DynamicTest
+        CheckResult testPlaylistWithoutAuth() {
+
+            TestedProgram userProgram = new TestedProgram();
+            userProgram.start(arguments);
+            userProgram.setReturnOutputAfterExecution(false);
+
+            userProgram.execute("playlists Party Time");
+
+            String outputAfterNew = userProgram.getOutput();
+
+            if (!outputAfterNew.strip().startsWith("Please, provide access for application.")) {
+                return CheckResult.wrong("When no access provided you should output " +
+                        "\"Please, provide access for application.\"");
+            }
+
+            userProgram.execute("exit");
+            userProgram.stop();
+
+            return CheckResult.correct();
+        }
+
+        @DynamicTest
+        CheckResult testAuth() {
+
+            TestedProgram userProgram = new TestedProgram();
+
+            userProgram.start(arguments);
+            userProgram.setReturnOutputAfterExecution(false);
+
+            auth(userProgram);
+
+            userProgram.execute("exit");
+            userProgram.stop();
+
+            return CheckResult.correct();
+
+        }
+
+        @DynamicTest
+        CheckResult testNew() {
+
+            TestedProgram userProgram = new TestedProgram();
+
+            userProgram.start(arguments);
+            userProgram.setReturnOutputAfterExecution(false);
+
+            auth(userProgram);
+
+            userProgram.execute("new");
+
+            if(!resourceServerMock.getAccess_token().contains(fictiveAccessToken)) {
+                return CheckResult.wrong("Access token is incorrect!");
+            }
+
+            String outputAfterNew = userProgram.getOutput();
+
+            String album1 =
+                    "Runnin'\n" +
+                            "[Pharrell Williams]\n" +
+                            "https://open.spotify.com/album/5ZX4m5aVSmWQ5iHAPQpT71"
+                                    .replaceAll(spotifyServerUrl, resourceServerUrl);
+
+            String album2 =
+                    "Sneakin'\n" +
+                            "[Drake2, Drake3]\n" +
+                            "https://open.spotify.com/album/0geTzdk2InlqIoB16fW9Nd"
+                                    .replaceAll(spotifyServerUrl, resourceServerUrl);
+
+            if (outputAfterNew.contains("Invalid access token")) {
+                return CheckResult.wrong("Your answer was `Invalid access token` on `new` action. " +
+                        "Make sure you use the server from -resource command line argument.");
+            }
+
+            if (!outputAfterNew.contains(album1) || !outputAfterNew.contains(album2)) {
+                return CheckResult.wrong(
+                        "There are no albums in correct format on \"new\" action. " +
+                                "Make sure you use the server from -resource command line argument.");
+            }
+
+            userProgram.execute("exit");
+            userProgram.stop();
+
+            return CheckResult.correct();
+        }
+
+        @DynamicTest
+        CheckResult testCategories() {
+
+            TestedProgram userProgram = new TestedProgram();
+
+            userProgram.start(arguments);
+            userProgram.setReturnOutputAfterExecution(false);
+
+            auth(userProgram);
+
+            userProgram.execute("categories");
+
+            if(!resourceServerMock.getAccess_token().contains(fictiveAccessToken)) {
+                return CheckResult.wrong("Access token is incorrect!");
+            }
+
+            String outputAfterCategories = userProgram.getOutput();
+
+            String category1 = "Top Lists";
+            String category2 = "Super Mood";
+            String category3 = "Party Time";
+
+            if (!outputAfterCategories.contains(category1)
+                    || !outputAfterCategories.contains(category2)
+                    || !outputAfterCategories.contains(category3)) {
+
+                return CheckResult.wrong("There are no categories in correct format on \"category\" action");
+            }
+
+            userProgram.execute("exit");
+            userProgram.stop();
+
+            return CheckResult.correct();
+        }
+
+        @DynamicTest
+        CheckResult testFeatured() {
+
+            TestedProgram userProgram = new TestedProgram();
+
+            userProgram.start(arguments);
+            userProgram.setReturnOutputAfterExecution(false);
+
+            auth(userProgram);
+
+            userProgram.execute("featured");
+
+            if(!resourceServerMock.getAccess_token().contains(fictiveAccessToken)) {
+                return CheckResult.wrong("Access token is incorrect!");
+            }
+
+            String outputAfterFeatured = userProgram.getOutput();
+
+            String featured1 =
+                    "Monday Morning Mood\n" +
+                            "http://open.spotify.com/user/spotify/playlist/6ftJBzU2LLQcaKefMi7ee7"
+                                    .replaceAll(spotifyServerUrl, resourceServerUrl);
+
+            String featured2 =
+                    "Upp och hoppa!\n" +
+                            "http://open.spotify.com/user/spotify__sverige/playlist/4uOEx4OUrkoGNZoIlWMUbO"
+                                    .replaceAll(spotifyServerUrl, resourceServerUrl);
+
+            if (!outputAfterFeatured.contains(featured1)
+                    || !outputAfterFeatured.contains(featured2)) {
+
+                return CheckResult.wrong("There are no featured playlists in correct format on \"featured\" action");
+            }
+
+            userProgram.execute("exit");
+            userProgram.stop();
+
+            return CheckResult.correct();
+        }
+
+        @DynamicTest
+        CheckResult testPartyPlayList() {
+
+            TestedProgram userProgram = new TestedProgram();
+
+            userProgram.start(arguments);
+            userProgram.setReturnOutputAfterExecution(false);
+
+            auth(userProgram);
+
+            userProgram.execute("playlists Party Time");
+
+            if(!resourceServerMock.getAccess_token().contains(fictiveAccessToken)) {
+                return CheckResult.wrong("Access token is incorrect!");
+            }
+
+            String outputAfterPartyPlaylist = userProgram.getOutput();
+
+            String playlist1 =
+                    "Noite Eletronica\n" +
+                            "http://open.spotify.com/user/spotifybrazilian/playlist/4k7EZPI3uKMz4aRRrLVfen"
+                                    .replaceAll(spotifyServerUrl, resourceServerUrl);
+
+            String playlist2 =
+                    "Festa Indie\n" +
+                            "http://open.spotify.com/user/spotifybrazilian/playlist/4HZh0C9y80GzHDbHZyX770"
+                                    .replaceAll(spotifyServerUrl, resourceServerUrl);
+
+            if (!outputAfterPartyPlaylist.contains(playlist1)
+                    || !outputAfterPartyPlaylist.contains(playlist2)) {
+                return CheckResult.wrong("There are no playlists in correct format on \"playlists {name}\" action. " +
+                        "Make sure you correctly parsed the category name.");
+            }
+
+            userProgram.execute("exit");
+            userProgram.stop();
+
+            return CheckResult.correct();
+        }
+
+        @DynamicTest
+        CheckResult testUnknownPlayList() {
+
+            TestedProgram userProgram = new TestedProgram();
+
+            userProgram.start(arguments);
+            userProgram.setReturnOutputAfterExecution(false);
+
+            auth(userProgram);
+
+            userProgram.execute("playlists Party Time");
+
+            if(!resourceServerMock.getAccess_token().contains(fictiveAccessToken)) {
+                return CheckResult.wrong("Access token is incorrect!");
+            }
+
+            String outputAfterUnknownPlaylist = userProgram.getOutput();
+
+            String playlist1 =
+                    "Noite Eletronica\n" +
+                            "http://open.spotify.com/user/spotifybrazilian/playlist/4k7EZPI3uKMz4aRRrLVfen"
+                                    .replaceAll(spotifyServerUrl, resourceServerUrl);
+
+            String playlist2 =
+                    "Festa Indie\n" +
+                            "http://open.spotify.com/user/spotifybrazilian/playlist/4HZh0C9y80GzHDbHZyX770"
+                                    .replaceAll(spotifyServerUrl, resourceServerUrl);
+
+            if (!outputAfterUnknownPlaylist.contains(playlist1)
+                    || !outputAfterUnknownPlaylist.contains(playlist2)) {
+
+                return CheckResult.wrong("There are no playlists in correct format on \"playlists {name}\" action. " +
+                        "Make sure you correctly parsed the category name.");
+            }
+
+            userProgram.execute("exit");
+            userProgram.stop();
+
+            return CheckResult.correct();
+        }
+
+        @DynamicTest
+        CheckResult testTopPlayList() {
+
+            TestedProgram userProgram = new TestedProgram();
+
+            userProgram.start(arguments);
+            userProgram.setReturnOutputAfterExecution(false);
+
+            auth(userProgram);
+
+            userProgram.execute("playlists Top Lists");
+
+            if(!resourceServerMock.getAccess_token().contains(fictiveAccessToken)) {
+                return CheckResult.wrong("Access token is incorrect!");
+            }
+
+            String outputAfterUnknownPlaylist = userProgram.getOutput();
+
+            if (!outputAfterUnknownPlaylist.contains(testErrorMessage)) {
+                return new CheckResult(false,
+                        "You got a json with unpredictable error from the api. " +
+                                "Error message should be parsed from the api response and printed.");
+            }
+
+            userProgram.execute("exit");
+            userProgram.stop();
+
+            return CheckResult.correct();
+        }
+
+        @AfterClass
+        public static void afterTest() {
+            tokenServer.stopMock();
+            resourceServer.stopMock();
+        }
+
+    }
+  learner_created: false
+- name: test/Server.java
+  visible: false
+  text: |
+    import org.hyperskill.hstest.dynamic.output.OutputHandler;
+    import org.hyperskill.hstest.testcase.CheckResult;
+    import org.hyperskill.hstest.testing.TestedProgram;
+
+    import java.net.URI;
+    import java.net.http.HttpClient;
+    import java.net.http.HttpRequest;
+    import java.net.http.HttpResponse;
+    import java.net.http.HttpTimeoutException;
+    import java.time.Duration;
+
+    public class Server extends Thread {
+
+        TestedProgram userProgram;
+        private final String fictiveAuthCode;
+        public static CheckResult checkResult = null;
+        String redirectUri = "";
+
+
+        public Server(TestedProgram userProgram, String fictiveAuthCode) {
+            this.userProgram = userProgram;
+            this.fictiveAuthCode = fictiveAuthCode;
+        }
+
+        @Override
+        public void run() {
+            long searchTime = System.currentTimeMillis();
+
+            while (!Thread.interrupted()) {
+
+                if (System.currentTimeMillis() - searchTime > 1000 * 9) {
+                    checkResult = CheckResult.wrong("Not found a link with redirect_uri after 9 seconds.");
+                    return;
+                }
+
+                String out = OutputHandler.getDynamicOutput();
+                if (out.contains("redirect_uri=")) {
+                    redirectUri = out.split("redirect_uri=")[1];
+                    if (redirectUri.contains("&")) {
+                        redirectUri = redirectUri.split("&")[0];
+                    }
+                    if (redirectUri.contains("\n")) {
+                        redirectUri = redirectUri.split("\\R")[0];
+                    }
+                    break;
+                }
+
+                try {
+                    sleep(100);
+                } catch (InterruptedException e) {
+                    e.printStackTrace();
+                }
+            }
+
+            try {
+                HttpClient client = HttpClient.newBuilder().build();
+                HttpRequest emptyRequest = HttpRequest.newBuilder()
+                        .uri(URI.create(redirectUri))
+                        .timeout(Duration.ofMillis(500))
+                        .GET()
+                        .build();
+                HttpRequest errorRequest = HttpRequest.newBuilder()
+                        .uri(URI.create(redirectUri + "?error=access_denied"))
+                        .timeout(Duration.ofMillis(500))
+                        .GET()
+                        .build();
+                HttpRequest codeRequest = HttpRequest.newBuilder()
+                        .uri(URI.create(redirectUri + "?code=" + fictiveAuthCode))
+                        .timeout(Duration.ofMillis(500))
+                        .GET()
+                        .build();
+
+                System.out.println("Tester: making requests to redirect uri: " + redirectUri);
+                HttpResponse<String> badResponse = client.send(emptyRequest, HttpResponse.BodyHandlers.ofString());
+                System.out.println("Tester: done request 1: " + badResponse.body());
+                HttpResponse<String> badResponse2 = client.send(errorRequest, HttpResponse.BodyHandlers.ofString());
+                System.out.println("Tester: done request 2: " + badResponse2.body());
+                HttpResponse<String> goodResponse = client.send(codeRequest, HttpResponse.BodyHandlers.ofString());
+                System.out.println("Tester: done request 3: " + goodResponse.body());
+
+                if (!badResponse.body().contains("Authorization code not found. Try again.")
+                        || !badResponse2.body().contains("Authorization code not found. Try again.")) {
+                    checkResult = CheckResult.wrong("You should send to the browser: `Authorization code not found. Try again.` if there is no code.");
+                    return;
+                }
+
+                if (!goodResponse.body().contains("Got the code. Return back to your program.")) {
+                    checkResult = CheckResult.wrong("\"You should send `Got the code. Return back to your program.` \" +\n" +
+                            "                        \"if the query contains the code.");
+                }
+            } catch (HttpTimeoutException e) {
+                checkResult = CheckResult.wrong("Not received any response from the server, found in redirect_uri: "
+                        + redirectUri);
+            } catch (InterruptedException e) {
+                checkResult = CheckResult.wrong("Request to " + redirectUri + " was interrupted. " +
+                        "Make sure, that you give the right feedback in your browser.");
+            } catch (Exception e) {
+                System.out.println("Tester: Error: " + e.getMessage());
+                e.printStackTrace();
+            }
+
+        }
+    }
+  learner_created: false
+- name: test/TempWebServerMock.java
+  visible: false
+  text: |
+    import org.hyperskill.hstest.exception.outcomes.WrongAnswer;
+    import org.hyperskill.hstest.mocks.web.WebPage;
+    import org.hyperskill.hstest.mocks.web.WebServerMock;
+    import org.hyperskill.hstest.mocks.web.request.HttpRequest;
+    import org.hyperskill.hstest.mocks.web.request.HttpRequestParser;
+
+    import java.io.DataInputStream;
+    import java.io.DataOutputStream;
+    import java.io.IOException;
+    import java.net.ServerSocket;
+    import java.net.Socket;
+    import java.util.HashMap;
+    import java.util.Map;
+
+    public class TempWebServerMock extends WebServerMock {
+
+        private static final String DELIM = "/";
+        private static final String fictiveAccessToken = "456456";
+        private static final String authorizationHeader = "Authorization";
+
+    //    public static void main(String[] args) { // for testing
+    //        org.hyperskill.hstest.mocks.web.WebServerMock ws = new org.hyperskill.hstest.mocks.web.WebServerMock(12345);
+    //        ws.start();
+    //        ws.run();
+    //    }
+
+        private ServerSocket serverSocket;
+        private final Map<String, String> pages = new HashMap<>();
+        private final int port;
+
+        private boolean isStarted = false;
+        private boolean isStopped = false;
+
+        private String access_token = "";
+
+        public TempWebServerMock(int port) {
+            super(port);
+            this.port = port;
+        }
+
+        public TempWebServerMock setPage(String url, String content) {
+            return setPage(url, new WebPage().setContent(content));
+        }
+
+        public TempWebServerMock setPage(String url, WebPage page) {
+            if (!url.startsWith(DELIM)) {
+                url = DELIM + url;
+            }
+            pages.put(url, page.contentWithHeader());
+            return this;
+        }
+
+        public String getAccess_token() {
+            return access_token;
+        }
+
+        private void checkRequestHeaders(HttpRequest request) throws WrongAnswer {
+            Map<String,String> requestHeaders = request.getHeaders();
+
+            if(requestHeaders.containsKey(authorizationHeader)) {
+                if(requestHeaders.get(authorizationHeader).contains(fictiveAccessToken)) {
+                    access_token = requestHeaders.get(authorizationHeader);
+                }
+            }
+        }
+
+        private String resolveRequest(DataInputStream input) {
+            HttpRequest request = HttpRequestParser.parse(input);
+            checkRequestHeaders(request);
+            return request != null ? request.getEndpoint() : null;
+        }
+
+        private void sendResponse(String path, DataOutputStream output) throws Exception {
+            String response;
+            if (path == null) {
+                response = "Webpage not found!";
+            } else {
+                if (!path.startsWith(DELIM)) {
+                    path = DELIM + path;
+                }
+                response = pages.getOrDefault(path, "Webpage not found!");
+            }
+            for (char c : response.toCharArray()) {
+                output.write(c);
+            }
+        }
+
+        private void handle(Socket socket) throws Exception {
+            DataInputStream input = new DataInputStream(socket.getInputStream());
+            DataOutputStream output = new DataOutputStream(socket.getOutputStream());
+            sendResponse(resolveRequest(input), output);
+            input.close();
+            output.close();
+            socket.close();
+        }
+
+        public void start() {
+            try {
+                serverSocket = new ServerSocket(port);
+            } catch (IOException ignored) { }
+        }
+
+        public void run() {
+            try {
+                while (serverSocket != null && !serverSocket.isClosed()) {
+                    isStarted = true;
+                    isStopped = false;
+                    handle(serverSocket.accept());
+                }
+            } catch (Exception ignored) { }
+            isStarted = false;
+            isStopped = true;
+        }
+
+        public void stop() {
+            try {
+                if (serverSocket != null) {
+                    serverSocket.close();
+                }
+            } catch (IOException ignored) { }
+        }
+
+        public boolean isStarted() {
+            return isStarted;
+        }
+
+        public boolean isStopped() {
+            return isStopped;
+        }
+    }
+  learner_created: false
+- name: src/http/Authorization.java
+  visible: true
+  learner_created: true
+- name: src/http/Responses.java
+  visible: true
+  learner_created: true
+- name: src/http/NotAuthorizedException.java
+  visible: true
+  learner_created: true
+feedback_link: https://hyperskill.org/projects/62/stages/338/implement#comment
+status: Solved
+record: 3
