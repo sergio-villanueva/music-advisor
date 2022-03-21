@@ -1,5 +1,5 @@
 # Music Advisor
-A Client App that connects to the Spotify Web API to bring a host of services such as featured playlists, spotify categories, new albums, and playlists by category to users. 
+A Client App that connects to the Spotify Web API to bring a host of services such as featured playlists, spotify categories, new albums, and playlists by category to users. Project code is found under the "music-advisor/Music Advisor/task/" path.
 
 ## Authorization
 The Music Advisor follows the OAuth 2.0 Authorization Code Flow outlined in detail at the Spotify for Developers [Development Guide](https://developer.spotify.com/documentation/general/guides/authorization/code-flow/). In short, users must grant permission to the app in order to use it. Here is the flow as described by Spotify: ![Code Grant](https://developer.spotify.com/assets/AuthG_AuthoriztionCode.png)
